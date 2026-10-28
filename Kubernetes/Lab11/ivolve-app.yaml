@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ivolve-nginx
+  namespace: ivolve
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ivolve-nginx
+  template:
+    metadata:
+      labels:
+        app: ivolve-nginx
+    spec:
+      tolerations:
+      - key: "workload"
+        operator: "Equal"
+        value: "ivolveApp"
+        effect: "NoSchedule"
+      nodeSelector:
+        project: ivolve
+      containers:
+      - name: nginx
+        image: nginx

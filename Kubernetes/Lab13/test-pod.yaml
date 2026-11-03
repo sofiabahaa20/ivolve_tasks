@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: logging-test
+  namespace: ivolve
+spec:
+  nodeSelector:
+    project: ivolve
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ivolveApp
+      effect: NoSchedule
+  containers:
+    - name: busybox
+      image: busybox:1.36
+      command: ["sh", "-c", "echo 'Lab 13 logging test' >> /logs/app.log && sleep 3600"]
+      volumeMounts:
+        - name: logs
+          mountPath: /logs
+  volumes:
+    - name: logs
+      persistentVolumeClaim:
+        claimName: ivolvepvc

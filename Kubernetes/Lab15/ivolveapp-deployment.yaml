@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ivolveapp
+  namespace: ivolve
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ivolveapp
+  template:
+    metadata:
+      labels:
+        app: ivolveapp
+    spec:
+      nodeSelector:
+        project: ivolve
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: ivolveApp
+          effect: NoSchedule
+      initContainers:
+        - name: init-mysql-setup
+          image: mysql:8.0
+          envFrom:
+            - configMapRef:
+                name: ivolvecm
+            - secretRef:
+                name: ivolvesecret
+          command: ["sh", "-c"]
+          args:
+            - |
+              export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+              until mysqladmin ping -h "$DB_HOST" -uroot --silent; do
+                echo "Waiting for MySQL at $DB_HOST ..."
+                sleep 2
+              done
+              mysql -h "$DB_HOST" -uroot -e "
+                CREATE DATABASE IF NOT EXISTS ivolve;
+                CREATE USER IF NOT EXISTS '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD';
+                GRANT ALL PRIVILEGES ON ivolve.* TO '$DB_USER'@'%';
+                FLUSH PRIVILEGES;"
+              echo "Database ivolve is ready and privileges are granted to $DB_USER"
+      containers:
+        - name: ivolveapp
+          image: sophiabahaaboshra/ivolve-app:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: ivolvecm
+            - secretRef:
+                name: ivolvesecret
+          volumeMounts:
+            - name: app-logs
+              mountPath: /app/logs
+      volumes:
+        - name: app-logs
+          persistentVolumeClaim:
+            claimName: ivolvepvc

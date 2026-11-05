@@ -1,0 +1,26 @@
+@Library('shared-lib') _
+
+pipeline {
+  agent { label 'agent-1' }
+  environment {
+    IMAGE = 'sophiabahaaboshra/demoapp'
+    TAG = "${BUILD_NUMBER}"
+    K8S_SERVER = 'https://192.168.198.137:6443'
+  }
+  stages {
+    stage('Build App') {
+      steps { BuildApp() }
+    }
+    stage('Build Image') {
+      steps { BuildImage(image: env.IMAGE, tag: env.TAG, credentialsId: 'dockerhub-creds') }
+    }
+    stage('Deploy to Kubernetes') {
+      steps { DeployOnK8s(image: env.IMAGE, tag: env.TAG, server: env.K8S_SERVER, tokenId: 'k8s-token') }
+    }
+  }
+  post {
+    always  { echo 'Pipeline finished.' }
+    success { echo 'Pipeline succeeded.' }
+    failure { echo 'Pipeline failed.' }
+  }
+}

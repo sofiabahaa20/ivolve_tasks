@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demoapp
+  namespace: ivolve
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: demoapp
+  template:
+    metadata:
+      labels:
+        app: demoapp
+    spec:
+      nodeSelector:
+        project: ivolve
+      tolerations:
+        - key: workload
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: demoapp
+          image: sophiabahaaboshra/demoapp:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi

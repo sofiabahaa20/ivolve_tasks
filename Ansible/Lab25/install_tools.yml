@@ -1,0 +1,170 @@
+---
+- name: Lab 25 - Install Docker, kubectl and Jenkins
+  hosts: managed
+  become: true
+
+  vars:
+    jenkins_port: 8082
+    k8s_minor: "v1.35"
+
+  tasks:
+    # ---------- Docker ----------
+    - name: Ensure Docker is installed
+      ansible.builtin.dnf:
+        name:
+          - docker-ce
+          - docker-ce-cli
+        state: present
+
+    - name: Ensure Docker is running and enabled
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    # ---------- Download GPG keys (slow network: long timeout + retries) ----------
+    - name: Download repo GPG keys
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "/tmp/{{ item.name }}"
+        mode: "0644"
+        timeout: 120
+      loop:
+        - { name: k8s.key, url: "https://pkgs.k8s.io/core:/stable:/{{ k8s_minor }}/rpm/repodata/repomd.xml.key" }
+        - { name: adoptium.key, url: "https://packages.adoptium.net/artifactory/api/gpg/key/public" }
+        - { name: jenkins.key, url: "https://pkg.jenkins.io/rpm-stable/jenkins.io-2026.key" }
+      register: key_dl
+      retries: 3
+      delay: 10
+      until: key_dl is succeeded
+
+    # ---------- kubectl ----------
+    - name: Import Kubernetes repo key
+      ansible.builtin.rpm_key:
+        key: /tmp/k8s.key
+        state: present
+
+    - name: Add Kubernetes repo
+      ansible.builtin.yum_repository:
+        name: kubernetes
+        description: "Kubernetes {{ k8s_minor }}"
+        baseurl: "https://pkgs.k8s.io/core:/stable:/{{ k8s_minor }}/rpm/"
+        gpgcheck: true
+        gpgkey: "https://pkgs.k8s.io/core:/stable:/{{ k8s_minor }}/rpm/repodata/repomd.xml.key"
+        enabled: true
+
+    - name: Install kubectl
+      ansible.builtin.dnf:
+        name: kubectl
+        state: present
+
+    # ---------- Java (Jenkins dependency) ----------
+    - name: Import Adoptium repo key
+      ansible.builtin.rpm_key:
+        key: /tmp/adoptium.key
+        state: present
+
+    - name: Add Adoptium repo
+      ansible.builtin.yum_repository:
+        name: adoptium
+        description: Adoptium Temurin
+        baseurl: "https://packages.adoptium.net/artifactory/rpm/rhel/10/x86_64"
+        gpgcheck: true
+        gpgkey: "https://packages.adoptium.net/artifactory/api/gpg/key/public"
+        enabled: true
+
+    - name: Install Java 21 and fontconfig
+      ansible.builtin.dnf:
+        name:
+          - temurin-21-jdk
+          - fontconfig
+        state: present
+
+    # ---------- Jenkins ----------
+    - name: Import Jenkins repo key
+      ansible.builtin.rpm_key:
+        key: /tmp/jenkins.key
+        state: present
+
+    - name: Add Jenkins repo
+      ansible.builtin.yum_repository:
+        name: jenkins
+        description: Jenkins stable
+        baseurl: "https://pkg.jenkins.io/rpm-stable"
+        gpgcheck: true
+        gpgkey: "https://pkg.jenkins.io/rpm-stable/jenkins.io-2026.key"
+        enabled: true
+
+    - name: Install Jenkins
+      ansible.builtin.dnf:
+        name: jenkins
+        state: present
+
+    - name: Create systemd drop-in directory for Jenkins
+      ansible.builtin.file:
+        path: /etc/systemd/system/jenkins.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Set Jenkins port
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/jenkins.service.d/override.conf
+        content: |
+          [Service]
+          Environment="JENKINS_PORT={{ jenkins_port }}"
+        mode: "0644"
+      notify: Restart Jenkins
+
+    - name: Apply pending handlers now
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure Jenkins is running and enabled
+      ansible.builtin.systemd:
+        name: jenkins
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    # ---------- Verification ----------
+    - name: Wait for Jenkins port
+      ansible.builtin.wait_for:
+        port: "{{ jenkins_port }}"
+        timeout: 180
+
+    - name: Check Jenkins web UI responds
+      ansible.builtin.uri:
+        url: "http://localhost:{{ jenkins_port }}/login"
+        status_code: 200
+      register: jenkins_check
+      retries: 12
+      delay: 10
+      until: jenkins_check.status == 200
+
+    - name: Get Docker version
+      ansible.builtin.command: docker --version
+      register: docker_ver
+      changed_when: false
+
+    - name: Get kubectl version
+      ansible.builtin.command: /usr/bin/kubectl version --client
+      register: kubectl_ver
+      changed_when: false
+
+    - name: Get Jenkins package version
+      ansible.builtin.command: rpm -q jenkins
+      register: jenkins_ver
+      changed_when: false
+
+    - name: Show results
+      ansible.builtin.debug:
+        msg:
+          - "{{ docker_ver.stdout }}"
+          - "{{ kubectl_ver.stdout_lines[0] }}"
+          - "{{ jenkins_ver.stdout }} on port {{ jenkins_port }}"
+
+  handlers:
+    - name: Restart Jenkins
+      ansible.builtin.systemd:
+        name: jenkins
+        state: restarted
+        daemon_reload: true
